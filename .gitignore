@@ -1,11 +1,15 @@
 *.egg-info
-*.json
+vibration_log_*.json
+calibration.json
 *.mov
 *.pyc
 .DS_Store
 .cursor/
 .localbin/
 .env
+.venv/
+.gemini/
+.agents/
 __pycache__/
 uv.lock
 dist/

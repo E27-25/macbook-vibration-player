@@ -1,326 +1,381 @@
-# apple-silicon-accelerometer
+<![CDATA[<div align="center">
 
-## Built with this
+<img src="assets/hero_banner.png" alt="MacBook Vibration Player" width="100%"/>
 
-| Project | Description |
-|---------|-------------|
-| **[Haptyk](https://haptyk.com)** | Free macOS app that turns your typing force into real mechanical keyboard sounds using the accelerometer |
-| [taigrr/spank](https://github.com/taigrr/spank) | Slap your MacBook, it yells back. Uses Apple Silicon accelerometer via IOKit HID |
-| [pirate/mac-hardware-toys](https://github.com/pirate/mac-hardware-toys) | Programmatically control Mac keyboard & display brightness, accelerometer data, fan speed, and more |
-| [Knock](https://www.tryknock.app/) | Turns taps on your MacBook into instant actions using the built-in accelerometer in Apple Silicon MacBooks |
+# 🎵 MacBook Vibration Player
 
-more information: [read the article on Medium](https://medium.com/@oli.bourbonnais/your-macbook-has-an-accelerometer-and-you-can-read-it-in-real-time-in-python-28d9395fb180)
+### _Turn your MacBook's hidden accelerometer into a vibration-triggered sound player_
 
-it turns out modern macbook pros have an undocumented mems accelerometer + gyroscope managed by the sensor processing unit (spu).
-this project reads both via iokit hid, along with lid angle and ambient light sensors from the same interface
+<br/>
 
-Built with this
-Haptyk - Free macOS app that turns your typing force into real mechanical keyboard sounds using the accelerometer.
-taigrr/spank - Slap your MacBook, it yells back. Uses Apple Silicon accelerometer via IOKit HID.
-pirate/mac-hardware-toys - Programmatically control Mac keyboard & display brightness, accelerometer data, fan speed, microphone, speaker, and more.
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![macOS](https://img.shields.io/badge/macOS-Apple_Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macbook-pro/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Built with macimu](https://img.shields.io/badge/Built_with-macimu-cyan?style=for-the-badge)](https://github.com/olvvier/apple-silicon-accelerometer)
 
-![demo](https://raw.githubusercontent.com/olvvier/apple-silicon-accelerometer/main/assets/demo.gif)
+<br/>
 
-## try it
-
-    git clone https://github.com/olvvier/apple-silicon-accelerometer
-    cd apple-silicon-accelerometer
-    python3 -m venv .venv && source .venv/bin/activate
-    pip install -e .[demo]
-    sudo .venv/bin/python3 motion_live.py
-
-## what is this
-
-apple silicon chips (M2/M3/M4/M5) have a hard to find mems IMU (accelerometer + gyroscope) managed by the sensor processing unit (SPU).
-it's not exposed through any public api or framework.
-this project reads raw 3-axis acceleration and angular velocity data at ~800hz via iokit hid callbacks.
-
-only tested on macbook pro m3 pro so far - might work on other apple silicon macs but no guarantees
-
-## how it works
-
-the sensor lives under AppleSPUHIDDevice in the iokit registry, on vendor usage page 0xFF00.
-usage 3 is the accelerometer, usage 9 is the gyroscope (same physical IMU, believed to be Bosch BMI286 based on teardowns).
-the driver is AppleSPUHIDDriver which is part of the sensor processing unit.
-we open it with IOHIDDeviceCreate and register an asynchronous callback via IOHIDDeviceRegisterInputReportCallback.
-data comes as 22-byte hid reports with x/y/z as int32 little-endian at byte offsets 6, 10, 14.
-divide by 65536 to get the value in g (accel) or deg/s (gyro).
-callback rate is ~100hz (decimated from ~800hz native)
-
-orientation is computed by fusing accel + gyro with a Mahony AHRS quaternion filter and displayed as roll/pitch/yaw gauges
-
-you can verify the device exists on your machine with:
-
-    ioreg -l -w0 | grep -A5 AppleSPUHIDDevice
-
-## install (beta API)
-
-    pip install macimu
-
-if you get `externally-managed-environment` (homebrew python), use a venv:
-
-    python3 -m venv .venv && source .venv/bin/activate && pip install macimu
-
-```python
-from macimu import IMU
-
-if __name__ == '__main__':
-    with IMU() as imu:
-        accel = imu.latest_accel()       # Sample(x, y, z) in g
-        gyro = imu.latest_gyro()         # Sample(x, y, z) in deg/s
-
-        for s in imu.read_accel():       # all new samples since last call
-            print(s.x, s.y, s.z)
-```
-
-requires root (sudo) because iokit hid device access needs elevated privileges.
-note: accelerometer reads ~1g at rest (gravity). use `macimu.filters.remove_gravity()` to isolate dynamic acceleration.
-
-### check if sensor exists (no root needed)
-
-```python
-from macimu import IMU
-print(IMU.available())   # True on macbook pro m2+
-```
-
-### real-time orientation (roll / pitch / yaw)
-
-fuses accel + gyro with a mahony quaternion filter, no math needed on your side
-
-```python
-from macimu import IMU
-
-if __name__ == '__main__':
-    with IMU(orientation=True) as imu:
-        o = imu.orientation()
-        print(f"{o.roll:.1f}° {o.pitch:.1f}° {o.yaw:.1f}°")
-        print(o.qw, o.qx, o.qy, o.qz)  # raw quaternion
-```
-
-### timestamped samples (hardware timestamps from iokit)
-
-each sample includes a precise timestamp from the hid report (mach_absolute_time),
-not a python-side clock. every report gets its own unique timestamp.
-
-```python
-from macimu import IMU
-
-if __name__ == '__main__':
-    with IMU() as imu:
-        for s in imu.read_accel_timed():
-            print(f"t={s.t:.6f}  x={s.x:.3f}  y={s.y:.3f}  z={s.z:.3f}")
-```
-
-### streaming with callback
-
-```python
-import time
-from macimu import IMU
-
-def on_sample(s):
-    print(s.x, s.y, s.z)
-
-if __name__ == '__main__':
-    with IMU() as imu:
-        stop = imu.on_accel(on_sample)  # background thread
-        time.sleep(10)
-        stop()                          # unregister
-```
-
-### sample rate control
-
-```python
-IMU(sample_rate=200)  # ~200 hz (preferred way)
-IMU(sample_rate=50)   # ~50 hz
-IMU(decimation=1)     # ~800 hz (full native rate)
-IMU(decimation=8)     # ~100 hz (default)
-```
-
-### signal processing (zero-dependency biquad butterworth filters)
-
-```python
-from macimu import IMU
-from macimu.filters import magnitude, remove_gravity, high_pass, low_pass, peak_detect
-
-if __name__ == '__main__':
-    with IMU() as imu:
-        samples = imu.read_accel()
-        m = magnitude(samples[0].x, samples[0].y, samples[0].z)
-        dynamic = remove_gravity(samples)               # kalman filter gravity removal
-        smooth = low_pass(samples, 5.0, 100.0)          # 2nd-order butterworth
-        taps = high_pass(samples, 10.0, 100.0, order=4) # 4th-order, -24 dB/oct
-        mags = [magnitude(s.x, s.y, s.z) for s in samples]
-        hits = peak_detect(mags, threshold=1.2)          # detect impacts
-```
-
-### mock mode (no root needed, for development / testing)
-
-```python
-from macimu import IMU
-
-imu = IMU.mock(duration=10.0, rate=100)  # synthetic sinusoidal data
-for s in imu.stream_accel():
-    print(s)
-```
-
-### record and replay
-
-```python
-from macimu import IMU
-
-if __name__ == '__main__':
-    # record
-    with IMU() as imu:
-        imu.record_to("session.csv")
-        time.sleep(10)
-
-    # replay (no root needed)
-    imu = IMU.from_recording("session.csv")
-    for s in imu.stream_accel_timed():
-        print(s)
-```
-
-### api reference
-
-**constructor**
-
-    IMU(accel=True, gyro=True, als=False, lid=False, orientation=False, decimation=8, sample_rate=None)
-
-**class methods** (no root needed)
-
-| method | returns | description |
-|--------|---------|-------------|
-| `IMU.available()` | `bool` | check if sensor exists |
-| `IMU.device_info()` | `dict` | sensors list, serial, product name |
-| `IMU.mock(duration, rate, noise)` | `IMU` | synthetic data for testing |
-| `IMU.from_recording(path)` | `IMU` | replay from csv |
-
-**reading data**
-
-| method | returns | description |
-|--------|---------|-------------|
-| `imu.read_accel()` | `list[Sample]` | new samples since last call (x, y, z in g) |
-| `imu.read_gyro()` | `list[Sample]` | new samples since last call (x, y, z in deg/s) |
-| `imu.read_accel_timed()` | `list[TimedSample]` | with hardware timestamp (t, x, y, z) |
-| `imu.read_gyro_timed()` | `list[TimedSample]` | same for gyro |
-| `imu.latest_accel()` | `Sample \| None` | most recent sample |
-| `imu.latest_gyro()` | `Sample \| None` | most recent sample |
-| `imu.read_all()` | `dict` | latest from all enabled sensors |
-
-**orientation & sensors**
-
-| method | returns | description |
-|--------|---------|-------------|
-| `imu.orientation()` | `Orientation \| None` | roll, pitch, yaw (deg) + quaternion |
-| `imu.read_lid()` | `float \| None` | lid angle in degrees |
-| `imu.read_als()` | `ALSReading \| None` | lux + 4 spectral channels |
-
-**streaming**
-
-| method | returns | description |
-|--------|---------|-------------|
-| `imu.stream_accel()` | generator | blocking, yields `Sample` |
-| `imu.stream_gyro()` | generator | blocking, yields `Sample` |
-| `imu.stream_accel_timed()` | generator | blocking, yields `TimedSample` |
-| `imu.stream_gyro_timed()` | generator | blocking, yields `TimedSample` |
-| `imu.on_accel(callback)` | `stop_fn` | background thread, call `stop()` to end |
-| `imu.on_gyro(callback)` | `stop_fn` | background thread, call `stop()` to end |
-
-**lifecycle**
-
-| method / property | description |
-|-------------------|-------------|
-| `imu.start()` / `imu.stop()` | manual lifecycle (or use `with IMU() as imu:`) |
-| `imu.is_running` | `True` if worker is active |
-| `imu.effective_sample_rate` | measured hz (or `None` if not enough data) |
-| `imu.record_to(path)` | start writing samples to csv |
-
-**filters** (`from macimu.filters import ...`) -- biquad butterworth, zero external deps
-
-| function | description |
-|----------|-------------|
-| `magnitude(x, y, z)` | euclidean magnitude |
-| `remove_gravity(samples, Q, R)` | kalman filter gravity subtraction |
-| `GravityKalman(Q, R)` | real-time gravity estimator (stateful) |
-| `low_pass(samples, cutoff_hz, rate, order=2)` | butterworth low-pass (-12 dB/oct per order of 2) |
-| `high_pass(samples, cutoff_hz, rate, order=2)` | butterworth high-pass |
-| `bandpass(samples, low, high, rate, order=2)` | cascaded hp + lp |
-| `filtfilt_low_pass(samples, cutoff_hz, rate)` | zero-phase lp (no lag, offline only) |
-| `filtfilt_high_pass(samples, cutoff_hz, rate)` | zero-phase hp (no lag, offline only) |
-| `median_filter(samples, window=5)` | spike / outlier removal |
-| `peak_detect(values, threshold, min_spacing)` | find peaks in 1d signal |
-| `rolling_rms(samples, window)` | rolling root-mean-square of magnitude |
-
-**exceptions**: `macimu.SensorNotFound` if no SPU device, `PermissionError` if not root
-
-## demo dashboard
-
-    git clone https://github.com/olvvier/apple-silicon-accelerometer
-    cd apple-silicon-accelerometer
-    python3 -m venv .venv && source .venv/bin/activate
-    pip install -e .[demo]
-    sudo .venv/bin/python3 motion_live.py
-
-the demo includes vibration detection, orientation gauges, experimental heartbeat (bcg), lid angle, ambient light, and optional keyboard flash
-
-### keyboard flash mode (bundled KBPulse)
-
-`motion_live.py` can flash the keyboard backlight from vibration intensity in near realtime.
-the repo now vendors KBPulse, including a prebuilt apple silicon binary at `KBPulse/bin/KBPulse`.
-
-run as usual:
-
-    sudo python3 motion_live.py
-
-optional overrides:
-
-    sudo python3 motion_live.py --no-kbpulse
-    sudo python3 motion_live.py --kbpulse-bin /path/to/KBPulse
-
-### with uv
-
-If you have `uv`/`uvx` installed, you can also just
-
-    sudo uvx git+https://github.com/olvvier/apple-silicon-accelerometer.git
-
-## code structure
-
-- macimu/ - python package (`pip install macimu`): high-level IMU class + low-level iokit bindings, shared memory ring buffers
-- motion_live.py - demo app: vibration detection, heartbeat bcg, terminal ui
-- KBPulse/ - vendored keyboard backlight driver code + binary (`KBPulse/bin/KBPulse`)
-
-## heartbeat demo
-
-place your wrists on the laptop near the trackpad and wait 10-20 seconds for the signal to stabilize.
-this uses ballistocardiography - the mechanical vibrations from your heartbeat transmitted through your arms into the chassis.
-experimental, not reliable, just a fun use-case to show what the sensor can pick up.
-the bcg bandpass is 0.8-3hz and bpm is estimated via autocorrelation on the filtered signal
-
-## notes
-
-- experimental / undocumented AppleSPU hid path
-- requires sudo
-- may break on future macos updates
-- use at your own risk
-- not for medical use
-
-## tested on
-
-- macbook pro m3 pro, macos 15.6.1
-- python 3.14
-
-
-## known incompatible
-
-- intel macs (no spu)
-- m1 macbook pro (2020)
-- mac studio m4 max 
-
-
-## license
-
-MIT
+> **Tap it. Knock it. Shake it.** Your MacBook plays a sound when it detects continuous vibration.
+> Uses the undocumented MEMS accelerometer in Apple Silicon chips (M2/M3/M4/M5).
 
 ---
 
-not affiliated with Apple or any employer
+</div>
+
+<br/>
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%">
+
+### 🔊 Vibration → Sound
+Detects continuous vibration on your MacBook and automatically plays your custom MP3 file.
+
+### 🎯 Smart Calibration
+Two-phase calibration measures your specific MacBook's noise floor and vibration response for pixel-perfect triggering.
+
+### 📊 Real-time Monitoring
+Live accelerometer magnitude display so you can see exactly what your MacBook senses.
+
+</td>
+<td width="50%">
+
+### ⚡ Sensitivity Presets
+Three presets — **LOW** (strong knocks only), **MEDIUM** (balanced), **HIGH** (light taps) — fine-tuned to your hardware.
+
+### 🛡️ Multi-Layer Detection
+STA/LTA ratios, CUSUM, kurtosis, crest factor, and MAD peak detection working together for robust vibration classification.
+
+### 🎛️ Fully Configurable
+Custom cooldowns, timeframes, tolerance windows, and severity filters. CLI flags override calibration values.
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+---
+
+<br/>
+
+## 🚀 Quick Start
+
+```bash
+# Clone the repo
+git clone https://github.com/E27-25/macbook-vibration-player.git
+cd macbook-vibration-player
+
+# Set up virtual environment
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .[demo]
+pip install python-dotenv
+
+# Create .env with your Mac password (for auto sudo)
+echo 'MAC_PASSWORD=your_password_here' > .env
+
+# Run the vibration player!
+python3 vibrate_player.py
+```
+
+> [!NOTE]
+> Requires **sudo** because IOKit HID device access needs elevated privileges. The script auto-elevates using the password in `.env`.
+
+<br/>
+
+---
+
+<br/>
+
+## 🎯 Calibration
+
+<div align="center">
+
+<img src="assets/calibration_diagram.png" alt="Calibration Process" width="600"/>
+
+</div>
+
+<br/>
+
+The calibration tool measures your MacBook's unique accelerometer characteristics and generates a `calibration.json` profile.
+
+### How it works
+
+| Phase | What happens | Duration |
+|:-----:|:-------------|:--------:|
+| **① Baseline** | MacBook sits still — measures noise floor and gravity vector | 3-5 sec |
+| **② Vibration** | You tap and shake — measures real vibration response | 5-10 sec |
+| **③ Profile** | Computes optimal thresholds based on your measurements | Instant |
+
+### Run calibration
+
+```bash
+# Full calibration (recommended for first time)
+python3 calibrate.py
+
+# Quick calibration with high sensitivity
+python3 calibrate.py --quick --sensitivity high
+
+# Custom output file
+python3 calibrate.py --output my_desk_profile.json
+```
+
+### Example output
+
+```
+╔═══════════════════════════════════════╗
+║   VIBRATE PLAYER CALIBRATION TOOL     ║
+╚═══════════════════════════════════════╝
+
+  PHASE 1: BASELINE MEASUREMENT
+  ██████████████████████████████████████░░  99.8%  mag:1.001463g
+
+  ✓ Baseline captured: 299 samples
+  Mean |g|     : 0.999967g
+  Noise floor  : 0.004336g (2σ)
+
+  PHASE 2: VIBRATION MEASUREMENT
+  █████████████████████████████░  99.8%  ███████████████  evts:162
+
+  ✓ Vibration data captured: 806 samples, 162 events
+
+  CALIBRATION PROFILE SUMMARY
+  Sensitivity      : HIGH
+  Noise floor      : 0.004781g
+  Trigger threshold: 0.011952g
+  Timeframe        : 1.0s
+
+  ✓ Calibration saved to: calibration.json
+```
+
+<br/>
+
+---
+
+<br/>
+
+## 🎮 Usage
+
+### Basic usage (auto-loads `calibration.json` if present)
+
+```bash
+python3 vibrate_player.py
+```
+
+### With explicit calibration file
+
+```bash
+python3 vibrate_player.py --calibration calibration.json
+```
+
+### Custom sound file
+
+```bash
+python3 vibrate_player.py my_sound.mp3
+```
+
+### Override parameters
+
+```bash
+# Very sensitive: trigger after 0.5s of vibration
+python3 vibrate_player.py --timeframe 0.5 --tolerance 0.2 --cooldown 1.0
+
+# Conservative: only trigger after 5s of sustained vibration
+python3 vibrate_player.py --timeframe 5.0 --tolerance 1.0 --cooldown 5.0
+```
+
+<br/>
+
+---
+
+<br/>
+
+## 🏗️ Architecture
+
+```mermaid
+graph LR
+    A[🖥️ MacBook Accelerometer] -->|IOKit HID| B[macimu Library]
+    B -->|100 Hz samples| C[VibrationDetector]
+    C -->|Events| D{Calibration Filter}
+    D -->|Severity + Magnitude| E[Continuous Timer]
+    E -->|Duration ≥ Timeframe| F[🔊 Play Sound]
+    
+    G[📋 calibrate.py] -->|Measures| H[calibration.json]
+    H -->|Loads thresholds| D
+    
+    style A fill:#1a1a2e,stroke:#00d4ff,color:#fff
+    style F fill:#1a1a2e,stroke:#ff6b6b,color:#fff
+    style H fill:#1a1a2e,stroke:#51cf66,color:#fff
+```
+
+<br/>
+
+### Detection Pipeline
+
+The vibration detection uses **5 independent algorithms** running in parallel:
+
+| Algorithm | Window | What it catches |
+|:----------|:------:|:----------------|
+| **STA/LTA** (3 timescales) | 3-2000 samples | Sudden energy changes vs background |
+| **CUSUM** | Cumulative | Gradual drift detection |
+| **Kurtosis** | 1 second | Impulsive / spiky signals |
+| **Crest Factor** | 2 seconds | Peak-to-RMS ratio |
+| **MAD Peak** | 2 seconds | Outliers via median absolute deviation |
+
+Events are classified into severity levels:
+
+```
+★ CHOC_MAJEUR  →  Major impact (4+ detectors, amp > 0.05g)
+▲ CHOC_MOYEN   →  Medium shock (3+ detectors, amp > 0.02g)
+△ MICRO_CHOC   →  Micro impact (peak detection, amp > 0.005g)
+● VIBRATION    →  Sustained vibration (STA/LTA or CUSUM, amp > 0.003g)
+○ VIB_LEGERE   →  Light vibration (amp > 0.001g)
+· MICRO_VIB    →  Micro vibration (below threshold)
+```
+
+<br/>
+
+---
+
+<br/>
+
+## 📂 Project Structure
+
+```
+macbook-vibration-player/
+├── 🎵 vibrate_player.py     # Main player — listens & plays sounds
+├── 🎯 calibrate.py          # Calibration tool — measures your MacBook
+├── 📊 motion_live.py        # Full dashboard (vibration, heartbeat, orientation)
+├── 📦 macimu/               # Core accelerometer library
+│   ├── __init__.py           #   High-level IMU class
+│   ├── _spu.py               #   Low-level IOKit HID bindings
+│   ├── filters.py            #   Butterworth filters, peak detect, etc.
+│   └── orientation.py        #   Mahony AHRS quaternion filter
+├── 💡 KBPulse/              # Keyboard backlight flash driver
+├── 🎵 k.mp3                 # Default notification sound
+├── ⚙️ .env                   # Mac password for auto-sudo
+├── 📋 calibration.json      # Generated calibration profile
+└── 📄 pyproject.toml        # Package metadata
+```
+
+<br/>
+
+---
+
+<br/>
+
+## 🧪 Sensitivity Guide
+
+<div align="center">
+
+| Setting | Trigger Threshold | Timeframe | Best For |
+|:-------:|:-----------------:|:---------:|:---------|
+| 🟢 **LOW** | ~6× noise floor | 3.0s | Strong knocks, drops, bumps |
+| 🟡 **MEDIUM** | ~4× noise floor | 2.0s | Table taps, typing, general use |
+| 🔴 **HIGH** | ~2.5× noise floor | 1.0s | Light taps, footsteps, music bass |
+
+</div>
+
+<br/>
+
+---
+
+<br/>
+
+## 🔧 Configuration Reference
+
+### CLI Arguments — `vibrate_player.py`
+
+| Argument | Default | Description |
+|:---------|:-------:|:------------|
+| `mp3_file` | `k.mp3` | Path to the sound file to play |
+| `--calibration`, `-c` | auto-detect | Path to `calibration.json` |
+| `--timeframe` | `2.0` | Seconds of continuous vibration needed to trigger |
+| `--tolerance` | `0.5` | Seconds of quiet before resetting the timer |
+| `--cooldown` | `2.0` | Minimum seconds between sound plays |
+
+### CLI Arguments — `calibrate.py`
+
+| Argument | Default | Description |
+|:---------|:-------:|:------------|
+| `--output`, `-o` | `calibration.json` | Output file path |
+| `--sensitivity`, `-s` | `medium` | Preset: `low`, `medium`, `high` |
+| `--quick`, `-q` | off | Shorter measurement durations |
+| `--baseline-duration` | `5.0` | Baseline phase duration (seconds) |
+| `--vibration-duration` | `10.0` | Vibration phase duration (seconds) |
+
+<br/>
+
+---
+
+<br/>
+
+## 🎥 Demo
+
+<div align="center">
+
+<img src="assets/demo.gif" alt="Motion Live Dashboard Demo" width="700"/>
+
+<br/>
+
+_The full `motion_live.py` dashboard showing real-time vibration detection, waveforms, spectrogram, orientation, heartbeat BCG, and more._
+
+</div>
+
+<br/>
+
+---
+
+<br/>
+
+## ⚙️ Requirements
+
+- **macOS** with Apple Silicon (M2, M3, M4, M5)
+- **Python** 3.9+
+- **sudo** access (for IOKit HID)
+
+### Tested On
+
+| Device | macOS | Python | Status |
+|:-------|:------|:-------|:------:|
+| MacBook Pro M3 Pro | 15.6.1 | 3.14 | ✅ |
+| MacBook Air M2 | 15.x | 3.9+ | ✅ |
+
+### Known Incompatible
+
+- ❌ Intel Macs (no SPU)
+- ❌ M1 MacBook Pro (2020)
+- ❌ Mac Studio M4 Max
+
+<br/>
+
+---
+
+<br/>
+
+## 🤝 Credits
+
+Built on top of the incredible [**macimu**](https://github.com/olvvier/apple-silicon-accelerometer) library by [olvvier](https://github.com/olvvier), which reverse-engineered Apple's undocumented SPU HID interface.
+
+<br/>
+
+## 📜 License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+<br/>
+
+---
+
+<div align="center">
+
+_Made with ❤️ and a lot of tapping on MacBooks_
+
+<br/>
+
+**⭐ Star this repo if you found it useful!**
+
+</div>
+]]>

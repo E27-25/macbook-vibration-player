@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 <img src="assets/hero_banner.png" alt="MacBook Vibration Player" width="100%"/>
 
@@ -378,4 +378,3 @@ _Made with ❤️ and a lot of tapping on MacBooks_
 **⭐ Star this repo if you found it useful!**
 
 </div>
-]]>
